@@ -1,32 +1,38 @@
+import time
+import random
 import openai
-import streamlit as st
+from openai.error import RateLimitError
 
-# Secrets から APIキーとパスワード（任意）を取得
-openai.api_key = st.secrets["OPENAI_API_KEY"]
-PASSWORD = st.secrets.get("APP_PASSWORD")
-if PASSWORD:
-    pw = st.text_input("🔒 パスワードを入力", type="password")
-    if pw != PASSWORD:
-        st.warning("パスワードが違います")
-        st.stop()
+def transcribe_with_exponential_backoff(audio_file, model="whisper-1", max_retries=5, base_delay=1.0):
+    """
+    audio_file: ファイルオブジェクト
+    model: Whisper のモデル名
+    max_retries: 最大リトライ回数
+    base_delay: 待ち時間のベース（秒）
+    """
+    for retry in range(1, max_retries + 1):
+        try:
+            # ここで実際の API 呼び出し
+            return openai.Audio.transcribe(model, audio_file)
+        except RateLimitError as e:
+            # 再試行するか、最後のリトライか
+            if retry == max_retries:
+                print(f"リトライ上限({max_retries})に到達。エラーを再送出します。")
+                raise
 
-st.title("🎤 Whisper文字起こしアプリ")
+            # 指数バックオフ＋ジッター
+            #  例: base_delay * 2^(retry-1) の範囲でランダム待機
+            exp_delay = base_delay * (2 ** (retry - 1))
+            jitter = random.uniform(0, exp_delay)
+            wait_time = jitter
 
-audio_file = st.file_uploader(
-    "音声ファイルを選択",
-    type=["mp3","wav","m4a","mp4","webm"]
-)
-model = st.selectbox(
-    "モデルを選択",
-    ["gpt-4o-mini-transcribe","gpt-4o-transcribe","whisper-1"]
-)
+            print(f"[Retry {retry}/{max_retries}] RateLimitError を検知 → {wait_time:.1f}s 待機して再試行…")
+            time.sleep(wait_time)
 
-if audio_file and st.button("文字起こし開始"):
-    with st.spinner("文字起こし中…"):
-        resp = openai.Audio.transcribe(
-            model=model,
-            file=audio_file,
-            response_format="text"
-        )
-    st.text_area("結果テキスト", resp, height=300)
-    st.download_button("テキストをダウンロード", resp, file_name="transcript.txt")
+    # ここには到達しない想定
+    raise RuntimeError("予期せぬエラー：transcribe_with_exponential_backoff が終了しました")
+
+# 使い方の例
+with open("input.wav", "rb") as f:
+    result = transcribe_with_exponential_backoff(f)
+    print(result["text"])
