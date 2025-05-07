@@ -1,9 +1,9 @@
 import time
-import openai
 import streamlit as st
+from openai import OpenAI
 
-# APIキーをシークレットから取得
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+# APIキーをシークレットから取得して初期化
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # セッションステート初期化
 if "busy_until" not in st.session_state:
@@ -26,7 +26,7 @@ if "APP_PASSWORD" in st.secrets and not st.session_state.authenticated:
 # メインアプリ
 st.title("🎤 Whisper文字起こしアプリ")
 
-audio = st.file_uploader("音声ファイルを選択", type=["mp3","wav","m4a","mp4","webm"])
+audio = st.file_uploader("音声ファイルを選択", type=["mp3","wav","m4a","mp4","webm","mpeg4"])
 model = st.selectbox("モデルを選択", ["whisper-1", "gpt-4o-mini-transcribe"])
 
 def transcribe_once(file, model_name):
@@ -38,7 +38,7 @@ def transcribe_once(file, model_name):
     st.session_state.busy_until = now + 60
 
     try:
-        return openai.Audio.transcribe(
+        return client.audio.transcriptions.create(
             model=model_name,
             file=file,
             response_format="text"
