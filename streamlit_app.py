@@ -1,20 +1,18 @@
 import time
+import openai
 import streamlit as st
-from openai import OpenAI
-from openai.error import RateLimitError
 
-# OpenAIクライアントの初期化（シークレットからAPIキー取得）
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+# APIキーをシークレットから取得
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # セッションステート初期化
 if "busy_until" not in st.session_state:
     st.session_state.busy_until = 0
 
-# パスワード認証機能（オプション - 使わない場合はこのブロックを削除）
+# パスワード認証機能（オプション）
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
-# パスワードが設定されている場合のみ認証を要求
 if "APP_PASSWORD" in st.secrets and not st.session_state.authenticated:
     password = st.text_input("パスワードを入力してください", type="password")
     if st.button("ログイン"):
@@ -23,7 +21,7 @@ if "APP_PASSWORD" in st.secrets and not st.session_state.authenticated:
             st.experimental_rerun()
         else:
             st.error("パスワードが違います")
-    st.stop()  # 認証されるまで先に進まない
+    st.stop()
 
 # メインアプリ
 st.title("🎤 Whisper文字起こしアプリ")
@@ -40,14 +38,11 @@ def transcribe_once(file, model_name):
     st.session_state.busy_until = now + 60
 
     try:
-        return client.audio.transcriptions.create(
+        return openai.Audio.transcribe(
             model=model_name,
             file=file,
             response_format="text"
         )
-    except RateLimitError:
-        st.error("サーバーが混み合っています。数秒待ってから再度お試しください。")
-        return None
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
         return None
