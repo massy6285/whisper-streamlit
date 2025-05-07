@@ -19,6 +19,14 @@ st.title("🎤 Whisper文字起こしアプリ")
 # タブ作成: 文字起こしと履歴
 tab1, tab2 = st.tabs(["文字起こし", "履歴"])
 
+# ユーティリティ関数 - 先に定義しておく
+def format_timestamp(seconds):
+    """秒数を MM:SS.MS 形式に変換"""
+    minutes = int(seconds // 60)
+    secs = int(seconds % 60)
+    millisecs = int((seconds % 1) * 1000)
+    return f"{minutes:02}:{secs:02}.{millisecs:03}"
+
 # 文字起こしタブの内容
 with tab1:
     # ファイルアップロード
@@ -133,14 +141,30 @@ with tab1:
                 st.text_area("テキスト", result.text, height=200)
                 plaintext = result.text
                 
-                # タイムスタンプ付きセグメント表示
+                # タイムスタンプ付きセグメント表示（修正部分）
                 if hasattr(result, 'segments'):
                     st.subheader("タイムスタンプ付きセグメント")
                     for segment in result.segments:
-                        # 開始時間と終了時間を表示
-                        start = format_timestamp(segment.start)
-                        end = format_timestamp(segment.end)
-                        st.markdown(f"**[{start} → {end}]** {segment.text}")
+                        try:
+                            # segment オブジェクトから直接属性にアクセス
+                            if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
+                                start_time = format_timestamp(segment.start)
+                                end_time = format_timestamp(segment.end)
+                                segment_text = segment.text
+                            # dict の場合
+                            elif isinstance(segment, dict):
+                                start_time = format_timestamp(segment.get('start', 0))
+                                end_time = format_timestamp(segment.get('end', 0))
+                                segment_text = segment.get('text', '')
+                            else:
+                                start_time = "??:??"
+                                end_time = "??:??"
+                                segment_text = str(segment)
+                                
+                            st.markdown(f"**[{start_time} → {end_time}]** {segment_text}")
+                        except Exception as e:
+                            st.error(f"セグメント表示エラー: {str(e)}")
+                            st.write(f"セグメント内容: {segment}")
             else:
                 # その他の形式（JSON文字列など）
                 st.subheader("文字起こし結果")
@@ -192,11 +216,3 @@ with tab2:
         if st.button("履歴をクリア"):
             st.session_state.transcription_history = []
             st.experimental_rerun()
-
-# ユーティリティ関数
-def format_timestamp(seconds):
-    """秒数を MM:SS.MS 形式に変換"""
-    minutes = int(seconds // 60)
-    secs = int(seconds % 60)
-    millisecs = int((seconds % 1) * 1000)
-    return f"{minutes:02}:{secs:02}.{millisecs:03}"
