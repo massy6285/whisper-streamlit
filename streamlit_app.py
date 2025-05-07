@@ -27,6 +27,74 @@ def format_timestamp(seconds):
     millisecs = int((seconds % 1) * 1000)
     return f"{minutes:02}:{secs:02}.{millisecs:03}"
 
+def srt_timestamp(seconds):
+    """秒数をSRT形式のタイムスタンプに変換 (HH:MM:SS,MS)"""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millisecs = int((seconds % 1) * 1000)
+    
+    return f"{hours:02}:{minutes:02}:{secs:02},{millisecs:03}"
+
+def create_timestamped_text(segments):
+    """タイムスタンプ付きテキストを作成"""
+    timestamped_text = ""
+    
+    for segment in segments:
+        try:
+            # segment オブジェクトから直接属性にアクセス
+            if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
+                start_time = format_timestamp(segment.start)
+                end_time = format_timestamp(segment.end)
+                segment_text = segment.text
+            # dict の場合
+            elif isinstance(segment, dict):
+                start_time = format_timestamp(segment.get('start', 0))
+                end_time = format_timestamp(segment.get('end', 0))
+                segment_text = segment.get('text', '')
+            else:
+                start_time = "??:??"
+                end_time = "??:??"
+                segment_text = str(segment)
+                
+            timestamped_text += f"[{start_time} → {end_time}] {segment_text}\n\n"
+        except Exception as e:
+            timestamped_text += f"[エラー] セグメント処理エラー: {str(e)}\n\n"
+    
+    return timestamped_text
+
+def convert_to_srt(segments):
+    """Whisper APIの結果をSRT形式に変換"""
+    srt_content = ""
+    
+    for i, segment in enumerate(segments):
+        try:
+            # セグメントの開始・終了時間を取得
+            if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
+                start = segment.start
+                end = segment.end
+                text = segment.text
+            elif isinstance(segment, dict):
+                start = segment.get('start', 0)
+                end = segment.get('end', 0)
+                text = segment.get('text', '')
+            else:
+                continue  # 不明なセグメント形式はスキップ
+            
+            # SRT形式のタイムスタンプフォーマット (HH:MM:SS,MS)
+            start_time = srt_timestamp(start)
+            end_time = srt_timestamp(end)
+            
+            # SRTエントリーを追加
+            srt_content += f"{i+1}\n"
+            srt_content += f"{start_time} --> {end_time}\n"
+            srt_content += f"{text}\n\n"
+        except Exception as e:
+            # エラーが発生したセグメントはスキップ
+            continue
+    
+    return srt_content
+
 # 文字起こしタブの内容
 with tab1:
     # ファイルアップロード
@@ -130,6 +198,9 @@ with tab1:
         
         if result:
             # 結果表示（タイプによって分岐）
+            has_segments = False
+            segments = []
+            
             if isinstance(result, str):
                 # テキスト形式の場合
                 st.subheader("文字起こし結果")
@@ -143,8 +214,11 @@ with tab1:
                 
                 # タイムスタンプ付きセグメント表示（修正部分）
                 if hasattr(result, 'segments'):
+                    has_segments = True
+                    segments = result.segments
+                    
                     st.subheader("タイムスタンプ付きセグメント")
-                    for segment in result.segments:
+                    for segment in segments:
                         try:
                             # segment オブジェクトから直接属性にアクセス
                             if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
@@ -170,22 +244,55 @@ with tab1:
                 st.subheader("文字起こし結果")
                 if isinstance(result, dict) and 'text' in result:
                     plaintext = result['text']
+                    # JSONからセグメント情報を取得
+                    if 'segments' in result:
+                        has_segments = True
+                        segments = result['segments']
                 else:
                     plaintext = str(result)
                 st.text_area("テキスト", plaintext, height=300)
             
-            # ダウンロードボタン
-            st.download_button(
-                "テキストファイルをダウンロード", 
-                plaintext, 
-                file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-            )
+            # ダウンロードボタンエリア
+            st.subheader("結果のダウンロード")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                # 通常テキストのダウンロード
+                st.download_button(
+                    "テキストのみ (.txt)", 
+                    plaintext, 
+                    file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain"
+                )
+            
+            # タイムスタンプ付きテキストのダウンロード（セグメントがある場合のみ）
+            if has_segments and segments:
+                with col2:
+                    timestamped_text = create_timestamped_text(segments)
+                    st.download_button(
+                        "タイムスタンプ付きテキスト (.txt)",
+                        timestamped_text,
+                        file_name=f"文字起こし_タイムスタンプ付き_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        mime="text/plain"
+                    )
+                
+                with col3:
+                    # SRT形式のダウンロード
+                    srt_content = convert_to_srt(segments)
+                    st.download_button(
+                        "字幕ファイル (.srt)",
+                        srt_content,
+                        file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt",
+                        mime="text/plain"
+                    )
             
             # 履歴に保存
             st.session_state.transcription_history.append({
                 "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "filename": audio.name,
-                "text": plaintext[:5000]  # 長すぎる場合は切り詰め
+                "text": plaintext[:5000],  # 長すぎる場合は切り詰め
+                "has_timestamps": has_segments,
+                "segments": segments if has_segments else []
             })
             st.success("結果を履歴に保存しました！")
 
@@ -205,12 +312,37 @@ with tab2:
                     height=200,
                     key=f"history_{i}"
                 )
-                st.download_button(
-                    "テキストを保存", 
-                    item["text"], 
-                    file_name=f"{item['filename']}_{item['timestamp']}.txt",
-                    key=f"download_{i}"
-                )
+                
+                # ダウンロードボタン - 履歴からも異なる形式でダウンロード可能に
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.download_button(
+                        "テキストを保存", 
+                        item["text"], 
+                        file_name=f"{item['filename']}_{item['timestamp']}.txt",
+                        key=f"download_txt_{i}"
+                    )
+                
+                # タイムスタンプ情報がある場合は追加のダウンロードオプションを表示
+                if item.get("has_timestamps", False) and item.get("segments"):
+                    with col2:
+                        timestamped_text = create_timestamped_text(item["segments"])
+                        st.download_button(
+                            "タイムスタンプ付きテキスト",
+                            timestamped_text,
+                            file_name=f"{item['filename']}_{item['timestamp']}_timestamps.txt",
+                            key=f"download_timestamps_{i}"
+                        )
+                    
+                    with col3:
+                        srt_content = convert_to_srt(item["segments"])
+                        st.download_button(
+                            "字幕ファイル (.srt)",
+                            srt_content,
+                            file_name=f"{item['filename']}_{item['timestamp']}.srt",
+                            key=f"download_srt_{i}"
+                        )
         
         # 履歴クリアボタン
         if st.button("履歴をクリア"):
