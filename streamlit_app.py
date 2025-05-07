@@ -38,25 +38,47 @@ def transcribe_once(file, model_name):
     st.session_state.busy_until = now + 60
 
     try:
+        # デバッグ情報表示
+        st.info(f"ファイル名: {file.name if hasattr(file, 'name') else '不明'}")
+        st.info(f"ファイルタイプ: {file.type if hasattr(file, 'type') else '不明'}")
+        st.info(f"ファイルサイズ: {file.size if hasattr(file, 'size') else '不明'} bytes")
+        
+        # ファイルデータをメモリにロード
+        file_bytes = file.read()
+        
         # gpt-4o-mini-transcribeモデルにはjsonフォーマット、whisper-1にはverbose_jsonを使用
         if model_name == "gpt-4o-mini-transcribe":
             response_format = "json"
         else:
             response_format = "verbose_json"
+        
+        # APIに渡すオプション
+        options = {
+            "model": model_name,
+            "file": file_bytes,
+            "response_format": response_format
+        }
+        
+        # タイムスタンプ設定（サポートされている場合のみ）
+        if response_format == "verbose_json":
+            options["timestamp_granularities"] = ["segment"]
             
-        return client.audio.transcriptions.create(
-            model=model_name,
-            file=file,
-            response_format=response_format,
-            timestamp_granularities=["segment"] if response_format == "verbose_json" else None
-        )
+        return client.audio.transcriptions.create(**options)
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
+        # エラーの詳細を表示（開発時のみ）
+        import traceback
+        st.code(traceback.format_exc())
         return None
         
 if audio and st.button("文字起こし開始"):
+    # ファイルを一度閉じてからポインタを先頭に戻す（リロード）
+    audio.seek(0)
+    
     with st.spinner("文字起こし中…"):
         result = transcribe_once(audio, model)
+    
+    # 結果表示部分は前回のコードと同じ
     
     if result:
         # 応答フォーマットによって表示方法を変える
