@@ -99,28 +99,9 @@ with tab1:
         # 進捗バーの作成
         progress_bar = progress_container.progress(0, text="準備中...")
         
-        # マメ知識をランダム表示
+        # マメ知識をランダム表示（シンプル化）
         with tips_container:
-            tip_placeholder = st.empty()
-            tip_index = 0
-        
-        # マメ知識の表示を定期的に更新する関数
-        def show_rotating_tips():
-            nonlocal tip_index
-            while True:
-                tip_placeholder.info(f"💡 マメ知識: {tips[tip_index % len(tips)]}")
-                tip_index += 1
-                time.sleep(3)  # 3秒ごとに切り替え
-                # 処理が完了したかチェック
-                if progress_bar.progress_value == 100:
-                    break
-        
-        # 別スレッドでマメ知識表示を開始（実際にはこれは機能しないので、簡易バージョンで代用）
-        # import threading
-        # threading.Thread(target=show_rotating_tips, daemon=True).start()
-        
-        # シンプルな代替手段: 数個のヒントを事前に表示
-        tip_placeholder.info(f"💡 マメ知識: {random.choice(tips)}")
+            st.info(f"💡 マメ知識: {random.choice(tips)}")
         
         # 文字起こし実行
         with st.spinner("文字起こし中..."):
