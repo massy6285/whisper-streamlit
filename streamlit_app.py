@@ -38,11 +38,17 @@ def transcribe_once(file, model_name):
     st.session_state.busy_until = now + 60
 
     try:
+        # gpt-4o-mini-transcribeモデルにはjsonフォーマット、whisper-1にはverbose_jsonを使用
+        if model_name == "gpt-4o-mini-transcribe":
+            response_format = "json"
+        else:
+            response_format = "verbose_json"
+            
         return client.audio.transcriptions.create(
             model=model_name,
             file=file,
-            response_format="verbose_json",  # JSONフォーマットでタイムスタンプ付き
-            timestamp_granularities=["segment", "word"]  # セグメントと単語レベルのタイムスタンプ
+            response_format=response_format,
+            timestamp_granularities=["segment"] if response_format == "verbose_json" else None
         )
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
@@ -51,6 +57,37 @@ def transcribe_once(file, model_name):
 if audio and st.button("文字起こし開始"):
     with st.spinner("文字起こし中…"):
         result = transcribe_once(audio, model)
+    
     if result:
-        st.text_area("文字起こし結果", result, height=300)
-        st.download_button("テキストを保存", result, file_name="transcript.txt")
+        # 応答フォーマットによって表示方法を変える
+        if model == "gpt-4o-mini-transcribe":
+            # jsonフォーマットの場合（辞書型に変換されている）
+            st.subheader("文字起こし結果")
+            full_text = result["text"]
+            st.text_area("完全なテキスト", full_text, height=200)
+            
+            # セグメントがある場合は表示
+            if "segments" in result:
+                st.subheader("タイムスタンプ付きセグメント")
+                for segment in result["segments"]:
+                    start = segment.get("start", 0)
+                    end = segment.get("end", 0)
+                    text = segment.get("text", "")
+                    st.markdown(f"**[{start:.2f}秒 - {end:.2f}秒]** {text}")
+            
+            # ダウンロードボタン
+            st.download_button("テキストを保存", full_text, file_name="transcript.txt")
+        else:
+            # verbose_jsonフォーマットの場合（オブジェクト）
+            st.subheader("文字起こし結果")
+            st.text_area("完全なテキスト", result.text, height=200)
+            
+            # セグメントを表示
+            st.subheader("タイムスタンプ付きセグメント")
+            for segment in result.segments:
+                start = segment.start
+                end = segment.end
+                st.markdown(f"**[{start:.2f}秒 - {end:.2f}秒]** {segment.text}")
+            
+            # ダウンロードボタン
+            st.download_button("テキストを保存", result.text, file_name="transcript.txt")
