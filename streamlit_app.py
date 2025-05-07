@@ -41,12 +41,13 @@ def transcribe_once(file, model_name):
         return client.audio.transcriptions.create(
             model=model_name,
             file=file,
-            response_format="text"
+            response_format="verbose_json",  # JSONフォーマットでタイムスタンプ付き
+            timestamp_granularities=["segment", "word"]  # セグメントと単語レベルのタイムスタンプ
         )
     except Exception as e:
         st.error(f"エラーが発生しました: {str(e)}")
         return None
-
+        
 if audio and st.button("文字起こし開始"):
     with st.spinner("文字起こし中…"):
         result = transcribe_once(audio, model)
