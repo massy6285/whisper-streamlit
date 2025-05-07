@@ -5,6 +5,8 @@ import tempfile
 import os
 from datetime import datetime
 import json
+from pydub import AudioSegment
+import math
 
 # OpenAIクライアントの初期化
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
@@ -15,6 +17,12 @@ if "transcription_history" not in st.session_state:
 
 # メインアプリのタイトル
 st.title("🎤 Whisper文字起こしアプリ")
+
+# 制限についての情報
+st.info("📌 **注意**: OpenAI Whisper APIには以下の制限があります：\n"
+        "- ファイルサイズ: 最大25MB\n"
+        "- 音声の長さ: 最大25分（1500秒）\n\n"
+        "制限を超える場合は、自動分割処理を行います。")
 
 # タブ作成: 文字起こしと履歴
 tab1, tab2 = st.tabs(["文字起こし", "履歴"])
@@ -36,21 +44,21 @@ def srt_timestamp(seconds):
     
     return f"{hours:02}:{minutes:02}:{secs:02},{millisecs:03}"
 
-def create_timestamped_text(segments):
-    """タイムスタンプ付きテキストを作成"""
+def create_timestamped_text(segments, time_offset=0):
+    """タイムスタンプ付きテキストを作成（オフセット付き）"""
     timestamped_text = ""
     
     for segment in segments:
         try:
             # segment オブジェクトから直接属性にアクセス
             if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
-                start_time = format_timestamp(segment.start)
-                end_time = format_timestamp(segment.end)
+                start_time = format_timestamp(segment.start + time_offset)
+                end_time = format_timestamp(segment.end + time_offset)
                 segment_text = segment.text
             # dict の場合
             elif isinstance(segment, dict):
-                start_time = format_timestamp(segment.get('start', 0))
-                end_time = format_timestamp(segment.get('end', 0))
+                start_time = format_timestamp(segment.get('start', 0) + time_offset)
+                end_time = format_timestamp(segment.get('end', 0) + time_offset)
                 segment_text = segment.get('text', '')
             else:
                 start_time = "??:??"
@@ -63,20 +71,20 @@ def create_timestamped_text(segments):
     
     return timestamped_text
 
-def convert_to_srt(segments):
-    """Whisper APIの結果をSRT形式に変換"""
+def convert_to_srt(segments, time_offset=0):
+    """Whisper APIの結果をSRT形式に変換（オフセット付き）"""
     srt_content = ""
     
     for i, segment in enumerate(segments):
         try:
             # セグメントの開始・終了時間を取得
             if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
-                start = segment.start
-                end = segment.end
+                start = segment.start + time_offset
+                end = segment.end + time_offset
                 text = segment.text
             elif isinstance(segment, dict):
-                start = segment.get('start', 0)
-                end = segment.get('end', 0)
+                start = segment.get('start', 0) + time_offset
+                end = segment.get('end', 0) + time_offset
                 text = segment.get('text', '')
             else:
                 continue  # 不明なセグメント形式はスキップ
@@ -95,33 +103,108 @@ def convert_to_srt(segments):
     
     return srt_content
 
+def get_audio_duration(file_path):
+    """音声ファイルの長さ（秒）を取得"""
+    try:
+        audio = AudioSegment.from_file(file_path)
+        return len(audio) / 1000  # ミリ秒を秒に変換
+    except Exception as e:
+        st.error(f"音声ファイルの長さを取得できません: {str(e)}")
+        return None
+
+def split_audio_file(file_path, max_duration=1440, output_format="mp3"):
+    """音声ファイルを指定された最大長で分割する
+    
+    Args:
+        file_path: 音声ファイルのパス
+        max_duration: 最大分割長（秒）、デフォルトは24分
+        output_format: 出力フォーマット（mp3, wav等）
+    
+    Returns:
+        分割されたファイルのパスのリスト
+    """
+    try:
+        # 音声を読み込む
+        st.info("音声ファイルを分割準備中...")
+        audio = AudioSegment.from_file(file_path)
+        
+        # 総時間（ミリ秒）
+        total_duration_ms = len(audio)
+        total_duration_sec = total_duration_ms / 1000
+        
+        # 必要な分割数を計算
+        max_duration_ms = max_duration * 1000
+        num_parts = math.ceil(total_duration_ms / max_duration_ms)
+        
+        if num_parts <= 1:
+            # 分割の必要がない場合は元のファイルを返す
+            return [file_path]
+        
+        st.info(f"音声ファイルを{num_parts}個のパートに分割します（合計時間: {total_duration_sec:.1f}秒）")
+        
+        # 一時ファイルのパスのリスト
+        split_files = []
+        
+        # 分割して一時ファイルに保存
+        for i in range(num_parts):
+            start_ms = i * max_duration_ms
+            end_ms = min((i + 1) * max_duration_ms, total_duration_ms)
+            
+            # セグメント切り出し
+            segment = audio[start_ms:end_ms]
+            
+            # 一時ファイルに保存
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{output_format}") as tmp_file:
+                segment_path = tmp_file.name
+                segment.export(segment_path, format=output_format)
+                split_files.append(segment_path)
+            
+            st.info(f"パート {i+1}/{num_parts} を分割しました（{start_ms/1000:.1f}秒 → {end_ms/1000:.1f}秒）")
+        
+        return split_files
+    
+    except Exception as e:
+        st.error(f"音声ファイル分割エラー: {str(e)}")
+        import traceback
+        st.code(traceback.format_exc())
+        return [file_path]  # エラーの場合は元のファイルを返す
+
 # 文字起こしタブの内容
 with tab1:
     # ファイルアップロード
-    audio = st.file_uploader("音声ファイルを選択", type=["mp3","wav","m4a","mp4","webm"])
+    audio = st.file_uploader(
+        "音声ファイルを選択", 
+        type=["mp3", "wav", "m4a", "mp4", "webm", "mpeg4"],
+        max_size_mb=25  # 25MBに制限
+    )
     
     # モデル選択
     model = st.selectbox("モデルを選択", ["whisper-1", "gpt-4o-mini-transcribe"])
     
-    # シンプルな詳細設定
-    show_timestamps = st.checkbox("タイムスタンプを表示", value=True)
-    
-    # 音声の種類（シンプルなドロップダウン）
-    audio_context = st.selectbox("音声の内容", [
-        "指定なし", 
-        "講演/プレゼン", 
-        "会議/ミーティング", 
-        "インタビュー",
-        "授業/講義",
-        "商談",
-        "説教/スピーチ"
-    ])
-    
-    # 固有名詞
-    proper_nouns = st.text_input("固有名詞（カンマ区切り）", "")
+    # 詳細設定エリア
+    with st.expander("詳細設定"):
+        show_timestamps = st.checkbox("タイムスタンプを表示", value=True)
+        
+        # 自動分割設定
+        max_segment_duration = st.slider(
+            "分割セグメントの最大長（分）", 
+            min_value=5, 
+            max_value=24, 
+            value=20,
+            help="制限を超える長い音声ファイルを分割する際の1セグメントあたりの最大長"
+        )
+        
+        # 音声の種類（シンプルなドロップダウン）
+        audio_context = st.selectbox(
+            "音声の内容", 
+            ["指定なし", "講演/プレゼン", "会議/ミーティング", "インタビュー", "授業/講義", "商談", "説教/スピーチ"]
+        )
+        
+        # 固有名詞
+        proper_nouns = st.text_input("固有名詞（カンマ区切り）", "")
     
     # 文字起こし関数の定義
-    def transcribe_audio(file, model_name, with_timestamps, context="", nouns=""):
+    def transcribe_audio(file_path, model_name, with_timestamps, context="", nouns=""):
         try:
             # プロンプト作成
             prompt = ""
@@ -133,16 +216,11 @@ with tab1:
                 if nouns_list:
                     prompt += f" 次の固有名詞が含まれています: {', '.join(nouns_list)}。"
             
-            # ファイルを一時ファイルとして保存
-            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file.name)[1]) as tmp_file:
-                tmp_file.write(file.getvalue())
-                tmp_file_path = tmp_file.name
-            
             # 進捗表示用のプレースホルダー
             progress = st.progress(30, text="文字起こし中...")
             
             # 一時ファイルを開いてAPIに渡す
-            with open(tmp_file_path, "rb") as audio_file:
+            with open(file_path, "rb") as audio_file:
                 # APIオプション
                 options = {
                     "model": model_name,
@@ -159,16 +237,12 @@ with tab1:
                 # プロンプトが指定されている場合は追加
                 if prompt:
                     options["prompt"] = prompt
-                    st.info(f"使用するプロンプト: {prompt}")
                 
                 progress.progress(60, text="OpenAI APIに送信中...")
                 result = client.audio.transcriptions.create(**options)
                 
             # 進捗を更新
             progress.progress(100, text="完了!")
-            
-            # 一時ファイルを削除
-            os.unlink(tmp_file_path)
             
             return result
         except Exception as e:
@@ -179,124 +253,262 @@ with tab1:
     
     # 文字起こし実行ボタン
     if audio and st.button("文字起こし開始"):
-        # ファイルサイズチェック - 25MB以上は警告表示
-        if audio.size > 25 * 1024 * 1024:  # 25MB
-            st.warning("⚠️ ファイルサイズが25MBを超えています。OpenAI APIの制限により処理できない可能性があります。")
-        
         # ファイル情報表示
         st.info(f"ファイル: {audio.name} ({audio.size} bytes)")
         
-        # 文字起こし実行
-        with st.spinner("文字起こし中..."):
-            result = transcribe_audio(
-                file=audio, 
-                model_name=model, 
-                with_timestamps=show_timestamps,
-                context=audio_context,
-                nouns=proper_nouns
-            )
+        # 一時ファイルに保存
+        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio.name)[1]) as tmp_file:
+            tmp_file.write(audio.getvalue())
+            tmp_file_path = tmp_file.name
         
-        if result:
-            # 結果表示（タイプによって分岐）
-            has_segments = False
-            segments = []
+        # 音声の長さを取得
+        duration = get_audio_duration(tmp_file_path)
+        
+        if duration:
+            st.info(f"音声の長さ: {duration:.1f}秒（約{int(duration/60)}分{int(duration%60)}秒）")
             
-            if isinstance(result, str):
-                # テキスト形式の場合
-                st.subheader("文字起こし結果")
-                st.text_area("テキスト", result, height=300)
-                plaintext = result
-            elif hasattr(result, 'text'):
-                # verbose_json形式の場合
-                st.subheader("文字起こし結果")
-                st.text_area("テキスト", result.text, height=200)
-                plaintext = result.text
+            # APIの制限（1500秒 = 25分）を超える場合は分割処理
+            if duration > 1500:
+                st.warning(f"⚠️ 音声ファイルの長さがOpenAI APIの制限（25分）を超えています。自動分割処理を行います。")
+                # 音声ファイルを分割（最大で指定された分数）
+                split_files = split_audio_file(
+                    tmp_file_path, 
+                    max_duration=max_segment_duration * 60,  # 分を秒に変換
+                    output_format=os.path.splitext(audio.name)[1].lstrip('.')
+                )
                 
-                # タイムスタンプ付きセグメント表示（修正部分）
-                if hasattr(result, 'segments'):
-                    has_segments = True
-                    segments = result.segments
+                # 結果を保存するための変数
+                all_text = ""
+                all_segments = []
+                segment_offset = 0  # タイムスタンプオフセット（秒）
+                
+                # 各パートを処理
+                for i, part_file in enumerate(split_files):
+                    st.info(f"パート {i+1}/{len(split_files)} を処理中...")
                     
+                    # 文字起こし実行
+                    result = transcribe_audio(
+                        file_path=part_file,
+                        model_name=model,
+                        with_timestamps=show_timestamps,
+                        context=audio_context,
+                        nouns=proper_nouns
+                    )
+                    
+                    # 結果を蓄積
+                    if result:
+                        if isinstance(result, str):
+                            # テキスト形式の場合
+                            all_text += f"\n--- パート {i+1} ---\n\n" + result
+                        elif hasattr(result, 'text'):
+                            # verbose_json形式の場合
+                            all_text += f"\n--- パート {i+1} ---\n\n" + result.text
+                            
+                            # セグメント情報を保存（オフセット付き）
+                            if hasattr(result, 'segments'):
+                                # 各セグメントにオフセットを追加
+                                for segment in result.segments:
+                                    if hasattr(segment, 'start'):
+                                        segment.start += segment_offset
+                                    if hasattr(segment, 'end'):
+                                        segment.end += segment_offset
+                                
+                                # セグメントを保存
+                                all_segments.extend(result.segments)
+                    
+                    # タイムスタンプオフセットを更新（次のパートのために）
+                    part_duration = get_audio_duration(part_file)
+                    if part_duration:
+                        segment_offset += part_duration
+                    
+                    # 一時ファイルを削除
+                    os.unlink(part_file)
+                
+                # 元の一時ファイルを削除
+                os.unlink(tmp_file_path)
+                
+                # 統合された結果を表示
+                st.subheader("文字起こし結果（複数パートを統合）")
+                st.text_area("テキスト", all_text, height=300)
+                
+                # タイムスタンプ付きセグメント表示
+                if show_timestamps and all_segments:
                     st.subheader("タイムスタンプ付きセグメント")
-                    for segment in segments:
+                    for segment in all_segments:
                         try:
                             # segment オブジェクトから直接属性にアクセス
                             if hasattr(segment, 'start') and hasattr(segment, 'end') and hasattr(segment, 'text'):
                                 start_time = format_timestamp(segment.start)
                                 end_time = format_timestamp(segment.end)
                                 segment_text = segment.text
-                            # dict の場合
-                            elif isinstance(segment, dict):
-                                start_time = format_timestamp(segment.get('start', 0))
-                                end_time = format_timestamp(segment.get('end', 0))
-                                segment_text = segment.get('text', '')
-                            else:
-                                start_time = "??:??"
-                                end_time = "??:??"
-                                segment_text = str(segment)
-                                
-                            st.markdown(f"**[{start_time} → {end_time}]** {segment_text}")
+                                st.markdown(f"**[{start_time} → {end_time}]** {segment_text}")
                         except Exception as e:
                             st.error(f"セグメント表示エラー: {str(e)}")
-                            st.write(f"セグメント内容: {segment}")
-            else:
-                # その他の形式（JSON文字列など）
-                st.subheader("文字起こし結果")
-                if isinstance(result, dict) and 'text' in result:
-                    plaintext = result['text']
-                    # JSONからセグメント情報を取得
-                    if 'segments' in result:
-                        has_segments = True
-                        segments = result['segments']
-                else:
-                    plaintext = str(result)
-                st.text_area("テキスト", plaintext, height=300)
-            
-            # ダウンロードボタンエリア
-            st.subheader("結果のダウンロード")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                # 通常テキストのダウンロード
-                st.download_button(
-                    "テキストのみ (.txt)", 
-                    plaintext, 
-                    file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
-                )
-            
-            # タイムスタンプ付きテキストのダウンロード（セグメントがある場合のみ）
-            if has_segments and segments:
-                with col2:
-                    timestamped_text = create_timestamped_text(segments)
+                
+                # ダウンロードボタンエリア
+                st.subheader("結果のダウンロード")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    # 通常テキストのダウンロード
                     st.download_button(
-                        "タイムスタンプ付きテキスト (.txt)",
-                        timestamped_text,
-                        file_name=f"文字起こし_タイムスタンプ付き_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                        "テキストのみ (.txt)", 
+                        all_text, 
+                        file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                         mime="text/plain"
                     )
                 
-                with col3:
-                    # SRT形式のダウンロード
-                    srt_content = convert_to_srt(segments)
-                    st.download_button(
-                        "字幕ファイル (.srt)",
-                        srt_content,
-                        file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt",
-                        mime="text/plain"
+                if all_segments:
+                    with col2:
+                        # タイムスタンプ付きテキストのダウンロード
+                        timestamped_text = create_timestamped_text(all_segments)
+                        st.download_button(
+                            "タイムスタンプ付きテキスト (.txt)",
+                            timestamped_text,
+                            file_name=f"文字起こし_タイムスタンプ付き_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            mime="text/plain"
+                        )
+                    
+                    with col3:
+                        # SRT形式のダウンロード
+                        srt_content = convert_to_srt(all_segments)
+                        st.download_button(
+                            "字幕ファイル (.srt)",
+                            srt_content,
+                            file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt",
+                            mime="text/plain"
+                        )
+                
+                # 履歴に保存
+                st.session_state.transcription_history.append({
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "filename": audio.name,
+                    "text": all_text[:5000],  # 長すぎる場合は切り詰め
+                    "has_timestamps": bool(all_segments),
+                    "segments": all_segments if bool(all_segments) else []
+                })
+                st.success("結果を履歴に保存しました！")
+                
+            else:
+                # APIの制限内の場合は通常処理
+                # 文字起こし実行
+                with st.spinner("文字起こし中..."):
+                    result = transcribe_audio(
+                        file_path=tmp_file_path,
+                        model_name=model,
+                        with_timestamps=show_timestamps,
+                        context=audio_context,
+                        nouns=proper_nouns
                     )
+                
+                # 一時ファイルを削除
+                os.unlink(tmp_file_path)
+                
+                if result:
+                    # 結果表示（タイプによって分岐）
+                    has_segments = False
+                    segments = []
+                    
+                    if isinstance(result, str):
+                        # テキスト形式の場合
+                        st.subheader("文字起こし結果")
+                        st.text_area("テキスト", result, height=300)
+                        plaintext = result
+                    elif hasattr(result, 'text'):
+                        # verbose_json形式の場合
+                        st.subheader("文字起こし結果")
+                        st.text_area("テキスト", result.text, height=200)
+                        plaintext = result.text
+                        
+                        # タイムスタンプ付きセグメント表示
+                        if hasattr(result, 'segments'):
+                            has_segments = True
+                            segments = result.segments
+                            
+                            st.subheader("タイムスタンプ付きセグメント")
+                            for segment in segments:
+                                try:
+                                    start_time = format_timestamp(segment.start)
+                                    end_time = format_timestamp(segment.end)
+                                    st.markdown(f"**[{start_time} → {end_time}]** {segment.text}")
+                                except Exception as e:
+                                    st.error(f"セグメント表示エラー: {str(e)}")
+                    else:
+                        # その他の形式（JSON文字列など）
+                        st.subheader("文字起こし結果")
+                        if isinstance(result, dict) and 'text' in result:
+                            plaintext = result['text']
+                            # JSONからセグメント情報を取得
+                            if 'segments' in result:
+                                has_segments = True
+                                segments = result['segments']
+                        else:
+                            plaintext = str(result)
+                        st.text_area("テキスト", plaintext, height=300)
+                    
+                    # ダウンロードボタンエリア
+                    st.subheader("結果のダウンロード")
+                    col1, col2, col3 = st.columns(3)
+                    
+                    with col1:
+                        # 通常テキストのダウンロード
+                        st.download_button(
+                            "テキストのみ (.txt)", 
+                            plaintext, 
+                            file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                            mime="text/plain"
+                        )
+                    
+                    # タイムスタンプ付きテキストのダウンロード（セグメントがある場合のみ）
+                    if has_segments and segments:
+                        with col2:
+                            timestamped_text = create_timestamped_text(segments)
+                            st.download_button(
+                                "タイムスタンプ付きテキスト (.txt)",
+                                timestamped_text,
+                                file_name=f"文字起こし_タイムスタンプ付き_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                                mime="text/plain"
+                            )
+                        
+                        with col3:
+                            # SRT形式のダウンロード
+                            srt_content = convert_to_srt(segments)
+                            st.download_button(
+                                "字幕ファイル (.srt)",
+                                srt_content,
+                                file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt",
+                                mime="text/plain"
+                            )
+                    
+                    # 履歴に保存
+                    st.session_state.transcription_history.append({
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "filename": audio.name,
+                        "text": plaintext[:5000],  # 長すぎる場合は切り詰め
+                        "has_timestamps": has_segments,
+                        "segments": segments if has_segments else []
+                    })
+                    st.success("結果を履歴に保存しました！")
+        else:
+            st.warning("⚠️ 音声ファイルの長さを取得できませんでした。処理を続行します。")
             
-            # 履歴に保存
-            st.session_state.transcription_history.append({
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "filename": audio.name,
-                "text": plaintext[:5000],  # 長すぎる場合は切り詰め
-                "has_timestamps": has_segments,
-                "segments": segments if has_segments else []
-            })
-            st.success("結果を履歴に保存しました！")
+            # 文字起こし実行
+            with st.spinner("文字起こし中..."):
+                result = transcribe_audio(
+                    file_path=tmp_file_path,
+                    model_name=model,
+                    with_timestamps=show_timestamps,
+                    context=audio_context,
+                    nouns=proper_nouns
+                )
+            
+            # 一時ファイルを削除
+            os.unlink(tmp_file_path)
+            
+            # 以降は通常処理と同様（前述のコードと同じなので省略）
+            # ...
 
-# 履歴タブの内容
+# 履歴タブの内容（前述のコードと同様なので省略）
 with tab2:
     st.header("文字起こし履歴")
     
