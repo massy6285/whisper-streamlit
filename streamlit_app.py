@@ -8,6 +8,221 @@ from datetime import datetime
 import math
 from pydub import AudioSegment
 
+st.set_page_config(
+    page_title="スチームパンク文字起こしラボ",
+    page_icon="🕰️",
+    layout="wide",
+)
+
+STEAMPUNK_STYLE = """
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@500;700&family=Special+Elite&display=swap');
+
+:root {
+    --steam-brass: #c8a46a;
+    --steam-copper: #a4692b;
+    --steam-iron: #2a2016;
+    --steam-slate: #45392c;
+    --steam-cream: #f8f1e2;
+}
+
+html, body {
+    background: radial-gradient(circle at top left, rgba(79,55,32,0.7), rgba(26,20,15,0.95)),
+                url('https://upload.wikimedia.org/wikipedia/commons/4/4d/Antique-paper-texture.jpg');
+    background-size: cover;
+}
+
+[data-testid="stAppViewContainer"] {
+    background: linear-gradient(135deg, rgba(35,26,19,0.95), rgba(17,13,10,0.9));
+    color: var(--steam-cream);
+    font-family: 'Shippori Mincho', 'Noto Serif JP', serif;
+}
+
+.stApp { background-color: transparent; }
+
+[data-testid="stHeader"] {
+    background: rgba(0, 0, 0, 0);
+}
+
+div.block-container {
+    background: rgba(39, 29, 21, 0.85);
+    padding: 2.5rem 3rem;
+    border-radius: 18px;
+    border: 2px solid var(--steam-brass);
+    box-shadow: 0 25px 40px rgba(0,0,0,0.45);
+}
+
+[data-testid="stSidebar"] {
+    background: rgba(26, 18, 12, 0.92);
+    border-right: 2px solid var(--steam-copper);
+}
+
+[data-testid="stSidebar"] * {
+    color: var(--steam-cream) !important;
+    font-family: 'Special Elite', 'Shippori Mincho', serif;
+}
+
+h1, h2, h3, h4, h5 {
+    font-family: 'Special Elite', 'Shippori Mincho', serif;
+    color: var(--steam-brass);
+    text-shadow: 0 0 8px rgba(160, 114, 51, 0.6);
+}
+
+.stMarkdown p {
+    color: var(--steam-cream);
+    line-height: 1.7;
+}
+
+[data-testid="stFileUploader"] > label,
+[data-testid="stSelectbox"] > label,
+[data-testid="stSlider"] > label,
+[data-testid="stTextInput"] > label,
+[data-testid="stCheckbox"] > label {
+    font-weight: 700;
+    color: var(--steam-brass);
+}
+
+[data-testid="stFileUploader"] section {
+    background: rgba(54, 40, 28, 0.8);
+    border: 1px dashed var(--steam-brass);
+    border-radius: 12px;
+}
+
+button[kind="secondary"] {
+    background: linear-gradient(145deg, rgba(84, 59, 38, 0.9), rgba(37, 27, 19, 0.95));
+    color: var(--steam-cream);
+    border: 1px solid var(--steam-brass);
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.3), 0 8px 18px rgba(0,0,0,0.4);
+}
+
+button[kind="secondary"]:hover {
+    border-color: #e3c995;
+    color: #fff3d5;
+    transform: translateY(-1px);
+}
+
+div[data-testid="stTabs"] button {
+    background: linear-gradient(135deg, rgba(70, 51, 34, 0.9), rgba(30, 22, 16, 0.9));
+    border: 1px solid var(--steam-copper);
+    color: var(--steam-cream);
+    font-family: 'Special Elite', 'Shippori Mincho', serif;
+    position: relative;
+}
+
+div[data-testid="stTabs"] button:hover {
+    border-color: var(--steam-brass);
+}
+
+div[data-testid="stTabs"] button:nth-child(1)::after,
+div[data-testid="stTabs"] button:nth-child(2)::after {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: -55px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(54, 39, 26, 0.95);
+    border: 1px solid var(--steam-brass);
+    color: var(--steam-cream);
+    white-space: nowrap;
+    font-size: 0.8rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.45);
+}
+
+div[data-testid="stTabs"] button:nth-child(1)::after {
+    content: '音声ファイルを文字起こしするためのメイン画面です。';
+}
+
+div[data-testid="stTabs"] button:nth-child(2)::after {
+    content: '保存された文字起こし結果を振り返り、再ダウンロードできます。';
+}
+
+div[data-testid="stTabs"] button:hover::after {
+    opacity: 1;
+}
+
+div[data-testid="stExpander"] > details > summary {
+    position: relative;
+    font-family: 'Special Elite', 'Shippori Mincho', serif;
+    color: var(--steam-brass);
+}
+
+div[data-testid="stExpander"] > details > summary::after {
+    content: '高度なオプションを開きます。マウスオーバーで説明を確認できます。';
+    position: absolute;
+    left: 0;
+    top: 100%;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(54, 39, 26, 0.95);
+    border: 1px solid var(--steam-brass);
+    color: var(--steam-cream);
+    font-size: 0.8rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease-in-out;
+    margin-top: 6px;
+    box-shadow: 0 8px 16px rgba(0,0,0,0.45);
+}
+
+div[data-testid="stExpander"] > details > summary:hover::after {
+    opacity: 1;
+}
+
+div[data-testid="stStatusWidget"] {
+    border: 1px solid var(--steam-copper);
+    background: rgba(40, 28, 19, 0.85);
+}
+
+div[data-baseweb="textarea"] textarea,
+input,
+.st-bp {
+    background: rgba(32, 24, 18, 0.8) !important;
+    color: var(--steam-cream) !important;
+    border-radius: 10px !important;
+    border: 1px solid rgba(200,164,106,0.6) !important;
+}
+
+div[data-testid="stProgress"] div[role="progressbar"] {
+    background: linear-gradient(90deg, rgba(141, 104, 54, 0.9), rgba(197, 173, 120, 0.9));
+}
+
+.stDownloadButton button,
+.stButton button {
+    background: linear-gradient(145deg, rgba(126, 89, 46, 0.95), rgba(61, 42, 25, 0.95));
+    border: 1px solid var(--steam-brass);
+    color: var(--steam-cream);
+    box-shadow: inset 0 0 10px rgba(0,0,0,0.35), 0 10px 20px rgba(0,0,0,0.5);
+    font-family: 'Special Elite', 'Shippori Mincho', serif;
+    letter-spacing: 0.05em;
+}
+
+.stDownloadButton button:hover,
+.stButton button:hover {
+    border-color: #ffe2a9;
+    color: #fff6dc;
+}
+
+.stAlert {
+    background: rgba(56, 39, 27, 0.85);
+    border: 1px solid var(--steam-copper);
+}
+
+.st-cg {
+    color: var(--steam-cream) !important;
+}
+
+.stCaption, .stInfo {
+    font-family: 'Shippori Mincho', serif;
+}
+</style>
+"""
+
+st.markdown(STEAMPUNK_STYLE, unsafe_allow_html=True)
+
 # OpenAIクライアントの初期化
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
@@ -16,16 +231,19 @@ if "transcription_history" not in st.session_state:
     st.session_state.transcription_history = []
 
 # メインアプリのタイトル
-st.title("🎤 Whisper文字起こしアプリ")
+st.title("🕰️ スチームパンク・トランスクリプションラボ")
+st.caption("歯車がきしむ実験室で、音声の謎を丁寧に記録しましょう。")
 
 # 制限についての情報
-st.info("📌 **注意**: OpenAI Whisper APIには以下の制限があります：\n"
-        "- ファイルサイズ: 最大25MB\n"
-        "- 音声の長さ: 最大25分（1500秒）\n\n"
-        "※ 制限を超える場合は、自動分割処理を行います。")
+st.info(
+    "📌 **利用上のご案内**\n"
+    "- ファイルサイズ: 最大25MB\n"
+    "- 音声の長さ: 最大25分（1500秒）\n\n"
+    "※ 制限を超える場合は、自動分割処理で適切に対応します。"
+)
 
 # タブ作成: 文字起こしと履歴
-tab1, tab2 = st.tabs(["文字起こし", "履歴"])
+tab1, tab2 = st.tabs(["⚙️ 文字起こし工房", "📜 履歴アーカイブ"])
 
 # ユーティリティ関数 - 先に定義しておく
 def format_timestamp(seconds: Optional[float]) -> str:
@@ -312,7 +530,7 @@ def split_audio_file(file_path, max_duration=1440):
     """
     try:
         # 音声を読み込む
-        st.info("音声ファイルの分割を準備中...")
+        st.info("⚙️ 歯車を調整しながら音声ファイルの分割を準備中です...")
         audio = AudioSegment.from_file(file_path)
         
         # 総時間（ミリ秒）
@@ -327,7 +545,7 @@ def split_audio_file(file_path, max_duration=1440):
             # 分割の必要がない場合は元のファイルを返す
             return [file_path]
         
-        st.info(f"音声ファイルを{num_parts}個のパートに分割します（合計時間: {total_duration_sec:.1f}秒）")
+        st.info(f"🧭 音声を{num_parts}巻に切り分けています（合計時間: {total_duration_sec:.1f}秒）")
         
         # 一時ファイルのパスのリスト
         split_files = []
@@ -350,7 +568,7 @@ def split_audio_file(file_path, max_duration=1440):
                 segment.export(segment_path, format=format_ext)
                 split_files.append(segment_path)
             
-            st.info(f"パート {i+1}/{num_parts} を分割しました（{start_ms/1000:.1f}秒 → {end_ms/1000:.1f}秒）")
+            st.info(f"🔩 パート {i+1}/{num_parts} を加工しました（{start_ms/1000:.1f}秒 → {end_ms/1000:.1f}秒）")
         
         return split_files
     
@@ -364,16 +582,30 @@ def split_audio_file(file_path, max_duration=1440):
 with tab1:
     # ファイルアップロード
     audio = st.file_uploader(
-        "音声ファイルを選択", 
-        type=["mp3", "wav", "m4a", "mp4", "webm", "mpeg4"]
+        "音声ファイルを選択",
+        type=["mp3", "wav", "m4a", "mp4", "webm", "mpeg4"],
+        help="歯車の中に投入する音声データをアップロードします。対応形式はMP3/WAV/M4A/MP4/WEBM/MPEG4です。",
     )
-    
+
     # モデル選択
-    model = st.selectbox("モデルを選択", ["whisper-1", "gpt-4o-mini-transcribe"])
-    
+    model_labels = {
+        "whisper-1": "Whisper-1（クラシックな高精度モデル）",
+        "gpt-4o-mini-transcribe": "GPT-4o mini transcribe（話者分離に対応）",
+    }
+    model = st.selectbox(
+        "モデルを選択",
+        ["whisper-1", "gpt-4o-mini-transcribe"],
+        format_func=lambda m: model_labels.get(m, m),
+        help="文字起こしを担う機械の種類を選びます。話者分離を使う場合はGPT-4o mini transcribeがおすすめです。",
+    )
+
     # 詳細設定エリア
-    with st.expander("詳細設定"):
-        show_timestamps = st.checkbox("タイムスタンプを表示", value=True)
+    with st.expander("⚙️ 詳細設定"):
+        show_timestamps = st.checkbox(
+            "タイムスタンプを表示",
+            value=True,
+            help="各発話の開始・終了時刻を記録します。台本づくりや映像編集に便利です。",
+        )
         enable_diarization = st.checkbox(
             "話者分離（スピーカー識別）を有効にする",
             value=False,
@@ -391,12 +623,17 @@ with tab1:
         
         # 音声の種類
         audio_context = st.selectbox(
-            "音声の内容", 
-            ["指定なし", "講演/プレゼン", "会議/ミーティング", "インタビュー", "授業/講義", "商談", "説教/スピーチ"]
+            "音声の内容",
+            ["指定なし", "講演/プレゼン", "会議/ミーティング", "インタビュー", "授業/講義", "商談", "説教/スピーチ"],
+            help="音声のおおまかな種類を選ぶと、モデルが文脈を理解しやすくなります。",
         )
-        
+
         # 固有名詞
-        proper_nouns = st.text_input("固有名詞（カンマ区切り）", "")
+        proper_nouns = st.text_input(
+            "固有名詞（カンマ区切り）",
+            "",
+            help="よく登場する名前や専門用語をカンマ区切りで入力すると、誤認識を減らせます。",
+        )
 
     if 'enable_diarization' not in locals():
         enable_diarization = False
@@ -425,7 +662,7 @@ with tab1:
                     prompt += f" 次の固有名詞が含まれています: {', '.join(nouns_list)}。"
             
             # 進捗表示用のプレースホルダー
-            progress = st.progress(30, text="文字起こし中...")
+            progress = st.progress(5, text="蒸気機関を起動しています...")
             
             needs_segments = with_timestamps or enable_diarization
             diarization_requested = enable_diarization and model_name != "whisper-1"
@@ -456,10 +693,10 @@ with tab1:
                 # プロンプトが指定されている場合は追加
                 if prompt:
                     base_options["prompt"] = prompt
-                    st.info(f"使用するプロンプト: {prompt}")
+                    st.info(f"📝 カスタム指示: {prompt}")
 
                 attempt_options = dict(base_options)
-                progress.progress(60, text="OpenAI APIに送信中...")
+                progress.progress(60, text="OpenAI 工房へ伝書鳩を飛ばしています...")
 
                 try:
                     result = client.audio.transcriptions.create(**attempt_options)
@@ -493,7 +730,7 @@ with tab1:
                         raise
 
             # 進捗を更新
-            progress.progress(100, text="完了!")
+            progress.progress(100, text="完了! 蒸気機関を停止します。")
 
             return result
         except Exception as e:
@@ -503,13 +740,16 @@ with tab1:
             return None
     
     # 文字起こし実行ボタン
-    if audio and st.button("文字起こし開始"):
+    if audio and st.button(
+        "🛠️ 文字起こしを開始",
+        help="アップロードした音声を解析し、文字とタイムスタンプを生成します。",
+    ):
         # ファイルサイズチェック - 25MB以上は警告表示
         if audio.size > 25 * 1024 * 1024:  # 25MB
             st.warning("⚠️ ファイルサイズが25MBを超えています。OpenAI APIの制限により処理できない可能性があります。")
         
         # ファイル情報表示
-        st.info(f"ファイル: {audio.name} ({audio.size} bytes)")
+        st.info(f"📁 取り扱いファイル: {audio.name} ({audio.size} bytes)")
         
         # 一時ファイルに保存
         with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(audio.name)[1]) as tmp_file:
@@ -520,7 +760,9 @@ with tab1:
         try:
             audio_segment = AudioSegment.from_file(tmp_file_path)
             duration_seconds = len(audio_segment) / 1000
-            st.info(f"音声の長さ: {duration_seconds:.1f}秒（約{int(duration_seconds/60)}分{int(duration_seconds%60)}秒）")
+            st.info(
+                f"⏱️ 音声の長さ: {duration_seconds:.1f}秒（約{int(duration_seconds/60)}分{int(duration_seconds%60)}秒）"
+            )
             
             # APIの制限（1500秒 = 25分）を超える場合は分割処理
             if duration_seconds > 1500:
@@ -572,7 +814,12 @@ with tab1:
 
                 if combined_text:
                     st.subheader("文字起こし結果（複数パートを統合）")
-                    st.text_area("テキスト", combined_text, height=300)
+                    st.text_area(
+                        "テキスト",
+                        combined_text,
+                        height=300,
+                        help="分割された全パートの文字起こしをまとめた全文です。必要に応じてコピーしてご利用ください。",
+                    )
                 else:
                     st.warning("文字起こしテキストを取得できませんでした。")
 
@@ -604,6 +851,7 @@ with tab1:
                         combined_text,
                         file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                         mime="text/plain",
+                        help="文字起こし全文をテキスト形式で保存します。読み返しや編集にご利用ください。",
                     )
 
                 if has_segments:
@@ -614,6 +862,7 @@ with tab1:
                             timestamped_text,
                             file_name=f"文字起こし_タイムスタンプ付き_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                             mime="text/plain",
+                            help="各セグメントの開始・終了時刻を含むテキストを保存します。映像編集や原稿整理に便利です。",
                         )
 
                     with col3:
@@ -623,6 +872,7 @@ with tab1:
                             srt_content,
                             file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt",
                             mime="text/plain",
+                            help="SRT形式の字幕ファイルを生成します。動画編集ソフトに取り込んで活用できます。",
                         )
 
                 st.session_state.transcription_history.append({
@@ -652,7 +902,12 @@ with tab1:
                 if result:
                     plaintext = get_transcript_text(result)
                     st.subheader("文字起こし結果")
-                    st.text_area("テキスト", plaintext, height=300)
+                    st.text_area(
+                        "テキスト",
+                        plaintext,
+                        height=300,
+                        help="今回の文字起こしで得られた全文です。コピーしてメモや原稿に貼り付けられます。",
+                    )
 
                     segments = extract_segments_from_result(result)
                     has_segments = bool(segments)
@@ -685,6 +940,7 @@ with tab1:
                             plaintext,
                             file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                             mime="text/plain",
+                            help="今回の文字起こし結果をテキストファイルとして保存します。",
                         )
 
                     if has_segments:
@@ -695,6 +951,7 @@ with tab1:
                                 timestamped_text,
                                 file_name=f"文字起こし_タイムスタンプ付き_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                                 mime="text/plain",
+                                help="タイムスタンプ入りのテキストを保存します。映像と同期させたい場合に便利です。",
                             )
 
                         with col3:
@@ -704,6 +961,7 @@ with tab1:
                                 srt_content,
                                 file_name=f"文字起こし_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt",
                                 mime="text/plain",
+                                help="動画編集ソフトで使えるSRT形式の字幕ファイルをダウンロードします。",
                             )
 
                     st.session_state.transcription_history.append({
@@ -740,18 +998,19 @@ with tab1:
 
 # 履歴タブの内容
 with tab2:
-    st.header("文字起こし履歴")
-    
+    st.header("📜 文字起こし履歴アーカイブ")
+
     if not st.session_state.transcription_history:
-        st.info("まだ履歴がありません。文字起こしを実行すると、ここに結果が表示されます。")
+        st.info("まだ記録された巻物はありません。文字起こしを実行すると、ここに成果が保管されます。")
     else:
         # 履歴の表示（新しい順）
         for i, item in enumerate(reversed(st.session_state.transcription_history)):
             with st.expander(f"{item['timestamp']} - {item['filename']}"):
                 st.text_area(
-                    "文字起こし結果", 
-                    item["text"], 
+                    "文字起こし結果",
+                    item["text"],
                     height=200,
+                    help="保存済みの文字起こし全文です。必要に応じて再確認やコピーができます。",
                     key=f"history_{i}"
                 )
                 
@@ -760,12 +1019,13 @@ with tab2:
                 
                 with col1:
                     st.download_button(
-                        "テキストを保存", 
-                        item["text"], 
+                        "テキストを保存",
+                        item["text"],
                         file_name=f"{item['filename']}_{item['timestamp']}.txt",
+                        help="この履歴の文字起こし全文をテキストファイルで保存します。",
                         key=f"download_txt_{i}"
                     )
-                
+
                 # タイムスタンプ情報がある場合は追加のダウンロードオプションを表示
                 if item.get("has_timestamps", False) and item.get("segments"):
                     with col2:
@@ -774,6 +1034,7 @@ with tab2:
                             "タイムスタンプ付きテキスト",
                             timestamped_text,
                             file_name=f"{item['filename']}_{item['timestamp']}_timestamps.txt",
+                            help="タイムスタンプ入りのテキストを再ダウンロードします。再利用に便利です。",
                             key=f"download_timestamps_{i}"
                         )
 
@@ -783,6 +1044,7 @@ with tab2:
                             "字幕ファイル (.srt)",
                             srt_content,
                             file_name=f"{item['filename']}_{item['timestamp']}.srt",
+                            help="履歴からSRT形式の字幕ファイルを再取得します。",
                             key=f"download_srt_{i}"
                         )
 
@@ -791,6 +1053,9 @@ with tab2:
                     display_speaker_timeline(item["segments"])
         
         # 履歴クリアボタン
-        if st.button("履歴をクリア"):
+        if st.button(
+            "🧹 履歴をクリア",
+            help="保存済みの文字起こし履歴をすべて削除します。必要なデータを保存済みかご確認ください。",
+        ):
             st.session_state.transcription_history = []
             st.experimental_rerun()  # 画面を更新
